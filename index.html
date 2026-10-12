@@ -1,0 +1,946 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aplikasi Pembayaran & Tagihan Bulanan Per Wilayah (Cloud Auto Sync)</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .badge-lunas { background-color: #198754; color: white; padding: 6px 12px; border-radius: 4px; }
+        .badge-belum { background-color: #dc3545; color: white; padding: 6px 12px; border-radius: 4px; }
+
+        @keyframes fadeInHighlight {
+            0% { background-color: #d1e7dd; transform: translateY(-5px); opacity: 0; }
+            50% { background-color: #d1e7dd; }
+            100% { background-color: transparent; transform: translateY(0); opacity: 1; }
+        }
+
+        @keyframes editHighlight {
+            0% { background-color: #fff3cd; }
+            100% { background-color: transparent; }
+        }
+
+        @keyframes fadeOutRow {
+            0% { opacity: 1; transform: translateX(0); }
+            100% { opacity: 0; transform: translateX(50px); }
+        }
+
+        .row-added { animation: fadeInHighlight 0.8s ease-out forwards; }
+        .row-edited { animation: editHighlight 1.2s ease-out forwards; }
+        .row-deleted { animation: fadeOutRow 0.5s ease-in forwards; }
+
+        #toastContainer {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 9999;
+        }
+
+        .login-overlay {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 10000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+    </style>
+</head>
+<body class="bg-light p-3 p-md-5">
+
+    <div id="toastContainer"></div>
+
+    <!-- Screen Login -->
+    <div id="loginScreen" class="login-overlay">
+        <div class="card p-4 shadow-lg border-0" style="width: 100%; max-width: 400px;">
+            <h3 class="text-center text-primary fw-bold mb-3">Login Sistem Tagihan</h3>
+            <p class="text-center text-muted small mb-4">Silakan masuk menggunakan akun Anda</p>
+            <form id="formLogin">
+                <div class="mb-3">
+                    <label class="form-label fw-bold">Username</label>
+                    <input type="text" id="loginUser" class="form-control" placeholder="Username Anda" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label fw-bold">Password</label>
+                    <input type="password" id="loginPass" class="form-control" placeholder="••••••••" required>
+                </div>
+                <div id="loginError" class="alert alert-danger d-none p-2 text-center small"></div>
+                <button type="submit" class="btn btn-primary w-100 fw-bold">Masuk</button>
+            </form>
+            <hr class="my-3">
+            <div class="small text-muted">
+                <strong>Info Login Demo:</strong><br>
+                • Admin: <code>admin</code> / <code>admin123</code><br>
+                • Penagihan Umum: <code>penagihan</code> / <code>tagih123</code><br>
+                • User Wilayah (Password: <code>258777</code>):<br>
+                &nbsp;&nbsp;<code>garuda</code>, <code>printis</code>, <code>wonocolo</code>, <code>tenggulunan</code>, <code>wage</code>
+            </div>
+        </div>
+    </div>
+
+    <!-- Screen Konten Utama -->
+    <div id="appScreen" class="container bg-white p-4 rounded shadow-sm d-none">
+        <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+            <div>
+                <h2 class="text-primary fw-bold m-0">Sistem Tagihan Bulanan (Realtime Cloud)</h2>
+                <div class="small text-muted">Login sebagai: <span id="currentUserRole" class="badge bg-secondary"></span></div>
+            </div>
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+                <button class="btn btn-success btn-sm fw-bold" onclick="exportKeExcel()">
+                    📊 Download Excel
+                </button>
+                <button class="btn btn-danger btn-sm fw-bold" onclick="exportKePDF()">
+                    📄 Download PDF
+                </button>
+                <div class="form-check form-switch ms-2" id="containerViewToggle">
+                    <input class="form-check-input" type="checkbox" id="toggleViewOnly" onchange="toggleViewMode()">
+                    <label class="form-check-input-label fw-bold" for="toggleViewOnly">Mode View Only</label>
+                </div>
+                <button class="btn btn-outline-danger btn-sm" onclick="logout()">Logout</button>
+            </div>
+        </div>
+
+        <!-- Form Input Pelanggan -->
+        <div class="card mb-4 border-light shadow-sm" id="cardForm">
+            <div class="card-header bg-primary text-white font-weight-bold" id="formHeader">Tambah Data Pelanggan Baru</div>
+            <div class="card-body">
+                <form id="formPelanggan" class="row g-3">
+                    <input type="hidden" id="editId">
+                    <div class="col-md-2">
+                        <label class="form-label">Wilayah / Area</label>
+                        <input type="text" id="wilayah" class="form-control" placeholder="Misal: WAGE GEMBILI" required>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Nama Pelanggan</label>
+                        <input type="text" id="nama" class="form-control" placeholder="Nama Pelanggan" required>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">No. WA / HP</label>
+                        <input type="text" id="noHp" class="form-control" placeholder="081234567890" required>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">Nominal (Rp)</label>
+                        <input type="number" id="nominal" class="form-control" placeholder="150000" required>
+                    </div>
+                    <div class="col-md-1">
+                        <label class="form-label">Metode</label>
+                        <select id="metode" class="form-select">
+                            <option value="TRANSFER">TRANSFER</option>
+                            <option value="CASH">CASH</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">Jatuh Tempo</label>
+                        <input type="number" id="jatuhTempo" class="form-control" min="1" max="31" placeholder="Tgl (1-31)">
+                    </div>
+                    <div class="col-12 text-end">
+                        <button type="button" id="btnBatal" class="btn btn-secondary d-none" onclick="batalEdit()">Batal Edit</button>
+                        <button type="submit" id="btnSimpan" class="btn btn-success">Simpan Ke Cloud</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Section Stat Wilayah -->
+        <div class="card border-info mb-4 shadow-sm">
+            <div class="card-header bg-info text-dark fw-bold">
+                Jumlah Pelanggan Per Wilayah
+            </div>
+            <div class="card-body">
+                <div id="containerStatWilayah" class="d-flex flex-wrap gap-2">
+                    <span class="text-muted small">Memuat data dari Cloud...</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Ringkasan Pendapatan -->
+        <div class="row g-3 mb-4">
+            <div class="col-md-6">
+                <div class="card border-primary h-100 shadow-sm">
+                    <div class="card-header bg-primary text-white fw-bold">
+                        Pendapatan Wilayah: <span id="labelWilayahTerpilih">Semua Wilayah</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between mb-2">
+                            <span>Jumlah Pelanggan Wilayah:</span>
+                            <span class="fw-bold text-dark" id="statWilayahJumlahPelanggan">0 orang</span>
+                        </div>
+                        <div class="d-flex justify-content-between mb-2">
+                            <span>Lunas (Kotor):</span>
+                            <span class="fw-bold text-success" id="statWilayahLunas">Rp 0</span>
+                        </div>
+                        <div class="d-flex justify-content-between mb-2">
+                            <span>Belum Bayar:</span>
+                            <span class="fw-bold text-danger" id="statWilayahBelum">Rp 0</span>
+                        </div>
+                        <div id="containerWilayahBagiHasil" class="p-2 mb-2 bg-warning bg-opacity-10 border border-warning rounded d-none">
+                            <div class="d-flex justify-content-between text-warning-emphasis small fw-bold">
+                                <span>Bagi Hasil Investor (Rp 50.000 / plg):</span>
+                                <span id="statWilayahInvestor">Rp 0</span>
+                            </div>
+                            <div class="d-flex justify-content-between text-success small fw-bold mt-1">
+                                <span>Total Lunas Bersih:</span>
+                                <span id="statWilayahLunasBersih">Rp 0</span>
+                            </div>
+                        </div>
+                        <hr class="my-2">
+                        <div class="d-flex justify-content-between">
+                            <span class="fw-bold">Total Tagihan Wilayah:</span>
+                            <span class="fw-bold text-primary" id="statWilayahTotal">Rp 0</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card border-dark h-100 shadow-sm">
+                    <div class="card-header bg-dark text-white fw-bold">
+                        Pendapatan Gabungan Bulanan (<span id="labelBulanTerpilih">-</span>)
+                    </div>
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between mb-2">
+                            <span>Total Pelanggan Keseluruhan:</span>
+                            <span class="fw-bold text-dark" id="statGabunganJumlahPelanggan">0 orang</span>
+                        </div>
+                        <div class="d-flex justify-content-between mb-2">
+                            <span>Total Lunas (Semua Wilayah Kotor):</span>
+                            <span class="fw-bold text-success" id="statGabunganLunas">Rp 0</span>
+                        </div>
+                        <div class="d-flex justify-content-between mb-2">
+                            <span>Total Belum Bayar (Semua Wilayah):</span>
+                            <span class="fw-bold text-danger" id="statGabunganBelum">Rp 0</span>
+                        </div>
+                        <div class="p-2 mb-2 bg-warning bg-opacity-10 border border-warning rounded">
+                            <div class="d-flex justify-content-between text-warning-emphasis small fw-bold">
+                                <span>Total Bagi Hasil Investor (WAGE GEMBILI):</span>
+                                <span id="statGabunganInvestor">Rp 0</span>
+                            </div>
+                            <div class="d-flex justify-content-between text-success small fw-bold mt-1">
+                                <span>Total Lunas Bersih (Setelah Potongan):</span>
+                                <span id="statGabunganLunasBersih">Rp 0</span>
+                            </div>
+                        </div>
+                        <hr class="my-2">
+                        <div class="d-flex justify-content-between">
+                            <span class="fw-bold">Total Potensi Pendapatan:</span>
+                            <span class="fw-bold text-dark" id="statGabunganTotal">Rp 0</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Filter & Pencarian -->
+        <div class="row g-3 align-items-center mb-3 bg-light p-3 rounded">
+            <div class="col-md-3">
+                <label class="fw-bold form-label">Filter Wilayah:</label>
+                <select id="filterWilayah" class="form-select" onchange="resetHalamanDanMuat()">
+                    <option value="SEMUA">-- Semua Wilayah --</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="fw-bold form-label">Filter Status Bayar:</label>
+                <select id="filterStatusBayar" class="form-select" onchange="resetHalamanDanMuat()">
+                    <option value="SEMUA">-- Semua Status --</option>
+                    <option value="LUNAS">LUNAS</option>
+                    <option value="BELUM">BELUM BAYAR</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="fw-bold form-label">Periode Tagihan:</label>
+                <input type="month" id="filterBulan" class="form-control" onchange="resetHalamanDanMuat()">
+            </div>
+            <div class="col-md-3">
+                <label class="fw-bold form-label">Cari Nama Pelanggan:</label>
+                <input type="text" id="filterCari" class="form-control" placeholder="Ketik nama..." onkeyup="resetHalamanDanMuat()">
+            </div>
+        </div>
+
+        <!-- Tabel Data -->
+        <div class="table-responsive">
+            <table class="table table-bordered table-striped align-middle">
+                <thead class="table-dark">
+                    <tr>
+                        <th>No</th>
+                        <th>Wilayah</th>
+                        <th>Nama Pelanggan</th>
+                        <th>No. WA</th>
+                        <th>Nominal Kotor</th>
+                        <th>Bersih (Nett)</th>
+                        <th>Via</th>
+                        <th>Jatuh Tempo</th>
+                        <th>Status</th>
+                        <th>Tgl Bayar</th>
+                        <th>Aksi</th>
+                    </tr>
+                </thead>
+                <tbody id="tabelTagihan">
+                    <tr><td colspan="11" class="text-center text-muted">Mengambil data dari Google Sheets...</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Pagination -->
+        <div class="d-flex justify-content-between align-items-center mt-3">
+            <div class="small text-muted" id="infoPagination">Menampilkan 0 data</div>
+            <nav>
+                <ul class="pagination pagination-sm m-0" id="ulPagination"></ul>
+            </nav>
+        </div>
+    </div>
+
+    <!-- JS Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+    <script>
+        // URL SCRIPT GOOGLE SHEETS CLOUD ANDA
+        const URL_SCRIPT = "https://script.google.com/macros/s/AKfycbzv7KBDzrf7UCTbADK-AaydnfaBLhs2KAeGNV4An9rquB7bYInfu1jyAhhY3UCf745P/exec";
+
+        const hariIni = new Date();
+        const bulanDefault = hariIni.toISOString().slice(0, 7);
+        document.getElementById('filterBulan').value = bulanDefault;
+
+        let globalCloudData = []; // Menjadi sumber data utama pengganti localStorage
+        let currentUser = null;
+        let isViewOnly = false;
+        let lastActionId = null;
+        let lastActionType = null;
+
+        let currentPage = 1;
+        const limitPerPage = 10;
+        let dataTersaringUntukPDF = [];
+
+        const ACCOUNTS = {
+            'admin': { pass: 'admin123', role: 'Administrator', canEdit: true, wilayahAkses: 'SEMUA' },
+            'penagihan': { pass: 'tagih123', role: 'Tim Penagihan', canEdit: false, wilayahAkses: 'SEMUA' },
+            'garuda': { pass: '258777', role: 'Penagihan GG GARUDA', canEdit: false, wilayahAkses: 'GG GARUDA' },
+            'printis': { pass: '258777', role: 'Penagihan GG PRINTIS', canEdit: false, wilayahAkses: 'GG PRINTIS' },
+            'wonocolo': { pass: '258777', role: 'Penagihan WONOCOLO', canEdit: false, wilayahAkses: 'WONOCOLO' },
+            'tenggulunan': { pass: '258777', role: 'Penagihan TENGGULUNAN', canEdit: false, wilayahAkses: 'TENGGULUNAN' },
+            'wage': { pass: '258777', role: 'Penagihan WAGE GEMBILI', canEdit: false, wilayahAkses: 'WAGE GEMBILI' }
+        };
+
+        function isWageGembili(namaWilayah) {
+            return (namaWilayah || '').toUpperCase().trim() === 'WAGE GEMBILI';
+        }
+
+        // --- SISTEM PEMBACAAN DATA CLOUD DIRECT ---
+        function ambilDataDariCloud(callback) {
+            fetch(URL_SCRIPT)
+                .then(res => res.json())
+                .then(data => {
+                    if (Array.isArray(data)) {
+                        globalCloudData = data;
+                        updateOpsiWilayah();
+                        muatData();
+                        if (callback) callback();
+                    }
+                })
+                .catch(err => {
+                    console.error("Gagal mengambil data dari Cloud:", err);
+                    showNotification("Gagal mengambil data dari Google Sheets", "danger");
+                });
+        }
+
+        function kirimAksiKeCloud(payload, pesanSukses) {
+            showNotification("Mengirim data ke Cloud...", "warning");
+            fetch(URL_SCRIPT, {
+                method: 'POST',
+                mode: 'no-cors',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            })
+            .then(() => {
+                showNotification(pesanSukses);
+                // Refresh data langsung dari Cloud
+                setTimeout(() => ambilDataDariCloud(), 800);
+            })
+            .catch(err => {
+                console.error("Gagal menyimpan ke Cloud:", err);
+                showNotification("Gagal memperbarui data di Cloud", "danger");
+            });
+        }
+
+        // --- LOGIN & SESSION ---
+        document.getElementById('formLogin').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const userVal = document.getElementById('loginUser').value.trim();
+            const passVal = document.getElementById('loginPass').value.trim();
+            const errEl = document.getElementById('loginError');
+
+            if (ACCOUNTS[userVal] && ACCOUNTS[userVal].pass === passVal) {
+                currentUser = { username: userVal, ...ACCOUNTS[userVal] };
+                sessionStorage.setItem('session_user', JSON.stringify(currentUser));
+                errEl.classList.add('d-none');
+                initAppScreen();
+            } else {
+                errEl.textContent = 'Username atau Password salah!';
+                errEl.classList.remove('d-none');
+            }
+        });
+
+        function checkSession() {
+            const savedSession = sessionStorage.getItem('session_user');
+            if (savedSession) {
+                currentUser = JSON.parse(savedSession);
+                initAppScreen();
+            } else {
+                document.getElementById('loginScreen').classList.remove('d-none');
+                document.getElementById('appScreen').classList.add('d-none');
+            }
+        }
+
+        function initAppScreen() {
+            document.getElementById('loginScreen').classList.add('d-none');
+            document.getElementById('appScreen').classList.remove('d-none');
+            document.getElementById('currentUserRole').textContent = `${currentUser.username.toUpperCase()} (${currentUser.role})`;
+
+            const cardForm = document.getElementById('cardForm');
+            const toggleContainer = document.getElementById('containerViewToggle');
+
+            if (!currentUser.canEdit) {
+                cardForm.classList.add('d-none');
+                toggleContainer.classList.add('d-none');
+                isViewOnly = true;
+            } else {
+                cardForm.classList.remove('d-none');
+                toggleContainer.classList.remove('d-none');
+                isViewOnly = document.getElementById('toggleViewOnly').checked;
+            }
+
+            if (currentUser.wilayahAkses && currentUser.wilayahAkses !== 'SEMUA') {
+                const selectWilayah = document.getElementById('filterWilayah');
+                selectWilayah.value = currentUser.wilayahAkses;
+                selectWilayah.disabled = true;
+            } else {
+                document.getElementById('filterWilayah').disabled = false;
+            }
+
+            ambilDataDariCloud();
+        }
+
+        function logout() {
+            sessionStorage.removeItem('session_user');
+            currentUser = null;
+            document.getElementById('formLogin').reset();
+            checkSession();
+        }
+
+        function showNotification(pesan, tipe = 'success') {
+            const container = document.getElementById('toastContainer');
+            const toastEl = document.createElement('div');
+            const bgClass = tipe === 'success' ? 'bg-success' : (tipe === 'danger' ? 'bg-danger' : 'bg-warning text-dark');
+            
+            toastEl.className = `toast align-items-center text-white ${bgClass} border-0 show mb-2 shadow`;
+            toastEl.setAttribute('role', 'alert');
+            toastEl.innerHTML = `
+                <div class="d-flex">
+                    <div class="toast-body fw-bold">${pesan}</div>
+                    <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+                </div>
+            `;
+            container.appendChild(toastEl);
+
+            setTimeout(() => {
+                toastEl.classList.remove('show');
+                setTimeout(() => toastEl.remove(), 300);
+            }, 3000);
+        }
+
+        function toggleViewMode() {
+            if (!currentUser || !currentUser.canEdit) return;
+            isViewOnly = document.getElementById('toggleViewOnly').checked;
+            const cardForm = document.getElementById('cardForm');
+            if (isViewOnly) {
+                cardForm.classList.add('d-none');
+                batalEdit();
+            } else {
+                cardForm.classList.remove('d-none');
+            }
+            muatData();
+        }
+
+        // --- FORM HANDLING ---
+        document.getElementById('formPelanggan').addEventListener('submit', function(e) {
+            e.preventDefault();
+            if (!currentUser || !currentUser.canEdit) return;
+
+            const editId = document.getElementById('editId').value;
+            const payloadData = {
+                id: editId ? editId : Date.now(),
+                wilayah: document.getElementById('wilayah').value.trim(),
+                nama: document.getElementById('nama').value.trim(),
+                noHp: document.getElementById('noHp').value.trim(),
+                nominal: parseFloat(document.getElementById('nominal').value),
+                metode: document.getElementById('metode').value,
+                jatuhTempo: document.getElementById('jatuhTempo').value || '-'
+            };
+
+            if (editId) {
+                lastActionId = editId;
+                lastActionType = 'edit';
+                kirimAksiKeCloud({ action: "EDIT_PELANGGAN", pelanggan: payloadData }, "✓ Data pelanggan berhasil diperbarui di Cloud!");
+            } else {
+                lastActionId = payloadData.id;
+                lastActionType = 'add';
+                kirimAksiKeCloud({ action: "ADD_PELANGGAN", pelanggan: payloadData }, "✓ Pelanggan baru berhasil ditambahkan ke Cloud!");
+            }
+
+            batalEdit();
+        });
+
+        function editPelanggan(id) {
+            if (!currentUser || !currentUser.canEdit) return;
+            const data = globalCloudData.find(p => String(p.id) === String(id));
+            if (!data) return;
+
+            document.getElementById('editId').value = data.id;
+            document.getElementById('wilayah').value = data.wilayah;
+            document.getElementById('nama').value = data.nama;
+            document.getElementById('noHp').value = data.noHp || '';
+            document.getElementById('nominal').value = data.nominal;
+            document.getElementById('metode').value = data.metode;
+            document.getElementById('jatuhTempo').value = data.jatuhTempo !== '-' ? data.jatuhTempo : '';
+
+            document.getElementById('formHeader').textContent = 'Edit Data Pelanggan';
+            document.getElementById('btnSimpan').textContent = 'Update Ke Cloud';
+            document.getElementById('btnBatal').classList.remove('d-none');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        function batalEdit() {
+            document.getElementById('editId').value = '';
+            document.getElementById('formPelanggan').reset();
+            document.getElementById('formHeader').textContent = 'Tambah Data Pelanggan Baru';
+            document.getElementById('btnSimpan').textContent = 'Simpan Ke Cloud';
+            document.getElementById('btnBatal').classList.add('d-none');
+        }
+
+        function updateOpsiWilayah() {
+            const filterSelect = document.getElementById('filterWilayah');
+            const nilaiSaatIni = filterSelect.value;
+            
+            const daftarWilayah = [...new Set(globalCloudData.map(p => p.wilayah))].sort();
+            
+            filterSelect.innerHTML = '<option value="SEMUA">-- Semua Wilayah --</option>';
+            daftarWilayah.forEach(w => {
+                if(w) {
+                    const opt = document.createElement('option');
+                    opt.value = w;
+                    opt.textContent = w;
+                    filterSelect.appendChild(opt);
+                }
+            });
+
+            if (nilaiSaatIni && filterSelect.querySelector(`option[value="${nilaiSaatIni}"]`)) {
+                filterSelect.value = nilaiSaatIni;
+            }
+        }
+
+        function resetHalamanDanMuat() {
+            currentPage = 1;
+            muatData();
+        }
+
+        // --- RENDER TABEL & STATISTIK ---
+        function muatData() {
+            const periode = document.getElementById('filterBulan').value;
+            let filterWilayah = document.getElementById('filterWilayah').value;
+            const filterStatus = document.getElementById('filterStatusBayar').value;
+            const cariNama = document.getElementById('filterCari').value.toLowerCase();
+            
+            if (currentUser && currentUser.wilayahAkses && currentUser.wilayahAkses !== 'SEMUA') {
+                filterWilayah = currentUser.wilayahAkses;
+            }
+
+            const tbody = document.getElementById('tabelTagihan');
+            tbody.innerHTML = '';
+
+            document.getElementById('labelBulanTerpilih').textContent = periode;
+            document.getElementById('labelWilayahTerpilih').textContent = filterWilayah === 'SEMUA' ? 'Semua Wilayah' : filterWilayah;
+
+            // Stat Per Wilayah
+            const containerStatWilayah = document.getElementById('containerStatWilayah');
+            containerStatWilayah.innerHTML = '';
+            
+            const hitungPerWilayah = {};
+            globalCloudData.forEach(p => {
+                if (filterWilayah === 'SEMUA' || p.wilayah === filterWilayah) {
+                    hitungPerWilayah[p.wilayah] = (hitungPerWilayah[p.wilayah] || 0) + 1;
+                }
+            });
+
+            const daftarWilayahSorted = Object.keys(hitungPerWilayah).sort();
+            if (daftarWilayahSorted.length === 0) {
+                containerStatWilayah.innerHTML = `<span class="text-muted small">Belum ada data wilayah.</span>`;
+            } else {
+                daftarWilayahSorted.forEach(w => {
+                    const badge = document.createElement('div');
+                    badge.className = 'badge bg-light text-dark border p-2 fs-6';
+                    badge.innerHTML = `<strong>${w}:</strong> <span class="badge bg-primary">${hitungPerWilayah[w]} pelanggan</span>`;
+                    containerStatWilayah.appendChild(badge);
+                });
+            }
+
+            // Stat Gabungan
+            let gabunganLunas = 0;
+            let gabunganBelum = 0;
+            let totalInvestorGabungan = 0;
+
+            const pelangganAksesUser = (currentUser && currentUser.wilayahAkses && currentUser.wilayahAkses !== 'SEMUA')
+                ? globalCloudData.filter(p => p.wilayah === currentUser.wilayahAkses)
+                : globalCloudData;
+
+            pelangganAksesUser.forEach(p => {
+                const isLunas = (p.status === "LUNAS" && p.periode === periode);
+                const isWage = isWageGembili(p.wilayah);
+                if (isLunas) {
+                    gabunganLunas += p.nominal;
+                    if (isWage) totalInvestorGabungan += 50000;
+                } else {
+                    gabunganBelum += p.nominal;
+                }
+            });
+
+            const gabunganLunasBersih = gabunganLunas - totalInvestorGabungan;
+
+            document.getElementById('statGabunganJumlahPelanggan').textContent = `${pelangganAksesUser.length} orang`;
+            document.getElementById('statGabunganLunas').textContent = `Rp ${gabunganLunas.toLocaleString('id-ID')}`;
+            document.getElementById('statGabunganBelum').textContent = `Rp ${gabunganBelum.toLocaleString('id-ID')}`;
+            document.getElementById('statGabunganInvestor').textContent = `Rp ${totalInvestorGabungan.toLocaleString('id-ID')}`;
+            document.getElementById('statGabunganLunasBersih').textContent = `Rp ${gabunganLunasBersih.toLocaleString('id-ID')}`;
+            document.getElementById('statGabunganTotal').textContent = `Rp ${(gabunganLunas + gabunganBelum).toLocaleString('id-ID')}`;
+
+            // Filter Tabel
+            let pelangganTabel = [...globalCloudData];
+
+            if (filterWilayah !== 'SEMUA') {
+                pelangganTabel = pelangganTabel.filter(p => p.wilayah === filterWilayah);
+            }
+
+            document.getElementById('statWilayahJumlahPelanggan').textContent = `${pelangganTabel.length} orang`;
+
+            let wilayahLunas = 0;
+            let wilayahBelum = 0;
+            let wilayahInvestor = 0;
+
+            pelangganTabel.forEach(p => {
+                const isLunas = (p.status === "LUNAS" && p.periode === periode);
+                const isWage = isWageGembili(p.wilayah);
+                if (isLunas) {
+                    wilayahLunas += p.nominal;
+                    if (isWage) wilayahInvestor += 50000;
+                } else {
+                    wilayahBelum += p.nominal;
+                }
+            });
+
+            const wilayahLunasBersih = wilayahLunas - wilayahInvestor;
+
+            document.getElementById('statWilayahLunas').textContent = `Rp ${wilayahLunas.toLocaleString('id-ID')}`;
+            document.getElementById('statWilayahBelum').textContent = `Rp ${wilayahBelum.toLocaleString('id-ID')}`;
+            document.getElementById('statWilayahTotal').textContent = `Rp ${(wilayahLunas + wilayahBelum).toLocaleString('id-ID')}`;
+
+            const containerWilayahBagiHasil = document.getElementById('containerWilayahBagiHasil');
+            if (isWageGembili(filterWilayah) || (filterWilayah === 'SEMUA' && wilayahInvestor > 0)) {
+                containerWilayahBagiHasil.classList.remove('d-none');
+                document.getElementById('statWilayahInvestor').textContent = `Rp ${wilayahInvestor.toLocaleString('id-ID')}`;
+                document.getElementById('statWilayahLunasBersih').textContent = `Rp ${wilayahLunasBersih.toLocaleString('id-ID')}`;
+            } else {
+                containerWilayahBagiHasil.classList.add('d-none');
+            }
+
+            // Filter Status
+            if (filterStatus !== 'SEMUA') {
+                pelangganTabel = pelangganTabel.filter(p => {
+                    const isLunas = (p.status === "LUNAS" && p.periode === periode);
+                    return filterStatus === 'LUNAS' ? isLunas : !isLunas;
+                });
+            }
+
+            // Filter Cari Nama
+            if (cariNama) {
+                pelangganTabel = pelangganTabel.filter(p => p.nama.toLowerCase().includes(cariNama));
+            }
+
+            dataTersaringUntukPDF = pelangganTabel;
+            const totalData = pelangganTabel.length;
+
+            if (totalData === 0) {
+                tbody.innerHTML = `<tr><td colspan="11" class="text-center text-muted">Data tidak ditemukan di Cloud.</td></tr>`;
+                document.getElementById('infoPagination').textContent = 'Menampilkan 0 data';
+                document.getElementById('ulPagination').innerHTML = '';
+                return;
+            }
+
+            const totalPages = Math.ceil(totalData / limitPerPage);
+            if (currentPage > totalPages) currentPage = totalPages;
+
+            const startIndex = (currentPage - 1) * limitPerPage;
+            const endIndex = Math.min(startIndex + limitPerPage, totalData);
+            const dataHalamanIni = pelangganTabel.slice(startIndex, endIndex);
+
+            dataHalamanIni.forEach((p, index) => {
+                const isLunas = (p.status === "LUNAS" && p.periode === periode);
+                const isWage = isWageGembili(p.wilayah);
+                const nominalBersih = isWage ? Math.max(0, p.nominal - 50000) : p.nominal;
+
+                const tr = document.createElement('tr');
+                tr.id = `row-${p.id}`;
+
+                if (p.id == lastActionId) {
+                    if (lastActionType === 'add') tr.classList.add('row-added');
+                    else if (lastActionType === 'edit') tr.classList.add('row-edited');
+                }
+
+                const isAllowedToEdit = currentUser && currentUser.canEdit && !isViewOnly;
+
+                tr.innerHTML = `
+                    <td>${startIndex + index + 1}</td>
+                    <td><span class="badge bg-info text-dark">${p.wilayah}</span></td>
+                    <td class="fw-bold">${p.nama}</td>
+                    <td>${p.noHp || '-'}</td>
+                    <td>Rp ${p.nominal.toLocaleString('id-ID')}</td>
+                    <td>
+                        <span class="fw-bold ${isWage ? 'text-success' : ''}">
+                            Rp ${nominalBersih.toLocaleString('id-ID')}
+                        </span>
+                        ${isWage ? '<br><small class="text-muted" style="font-size:10px;">(-50rb Investor)</small>' : ''}
+                    </td>
+                    <td><span class="badge bg-secondary">${p.metode}</span></td>
+                    <td>${p.jatuhTempo !== '-' ? 'Tgl ' + p.jatuhTempo : '-'}</td>
+                    <td>
+                        <span class="${isLunas ? 'badge-lunas' : 'badge-belum'}">
+                            ${isLunas ? 'LUNAS' : 'BELUM BAYAR'}
+                        </span>
+                    </td>
+                    <td>${isLunas ? p.tglBayar : '-'}</td>
+                    <td>
+                        ${isLunas 
+                            ? `<button class="btn btn-sm btn-outline-danger" onclick="batalBayar('${p.id}')">Batal</button>
+                               <button class="btn btn-sm btn-success ms-1" onclick="kirimStrukWA('${p.id}', '${periode}')">Kirim Struk</button>`
+                            : `<button class="btn btn-sm btn-success" onclick="prosesBayar('${p.id}', '${periode}')">Tandai Bayar</button>
+                               <button class="btn btn-sm btn-outline-warning ms-1" onclick="kirimTagihanWA('${p.id}', '${periode}')">Tagih WA</button>`
+                        }
+                        ${isAllowedToEdit ? `
+                            <button class="btn btn-sm btn-warning ms-1" onclick="editPelanggan(${p.id})">Edit</button>
+                            <button class="btn btn-sm btn-danger ms-1" onclick="hapusPelanggan(${p.id})">Hapus</button>
+                        ` : ''}
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+            lastActionId = null;
+            lastActionType = null;
+
+            document.getElementById('infoPagination').textContent = `Menampilkan ${startIndex + 1} - ${endIndex} dari ${totalData} pelanggan`;
+            renderPaginationControls(totalPages);
+        }
+
+        function renderPaginationControls(totalPages) {
+            const ul = document.getElementById('ulPagination');
+            ul.innerHTML = '';
+            if (totalPages <= 1) return;
+
+            const liPrev = document.createElement('li');
+            liPrev.className = `page-item ${currentPage === 1 ? 'disabled' : ''}`;
+            liPrev.innerHTML = `<a class="page-link" href="#" onclick="pindahHalaman(${currentPage - 1}); return false;">&laquo;</a>`;
+            ul.appendChild(liPrev);
+
+            for (let i = 1; i <= totalPages; i++) {
+                const li = document.createElement('li');
+                li.className = `page-item ${i === currentPage ? 'active' : ''}`;
+                li.innerHTML = `<a class="page-link" href="#" onclick="pindahHalaman(${i}); return false;">${i}</a>`;
+                ul.appendChild(li);
+            }
+
+            const liNext = document.createElement('li');
+            liNext.className = `page-item ${currentPage === totalPages ? 'disabled' : ''}`;
+            liNext.innerHTML = `<a class="page-link" href="#" onclick="pindahHalaman(${currentPage + 1}); return false;">&raquo;</a>`;
+            ul.appendChild(liNext);
+        }
+
+        function pindahHalaman(page) {
+            currentPage = page;
+            muatData();
+        }
+
+        // --- AKSI PEMBAYARAN CLOUD DIRECT ---
+        function prosesBayar(pelangganId, periode) {
+            const now = new Date();
+            const tglFormatted = now.toLocaleDateString('id-ID') + ' ' + now.toLocaleTimeString('id-ID', {hour: '2-digit', minute:'2-digit'});
+            
+            kirimAksiKeCloud({
+                action: "PROSES_BAYAR",
+                id: pelangganId,
+                periode: periode,
+                tglBayar: tglFormatted
+            }, "Status diubah menjadi LUNAS di Cloud");
+
+            kirimStrukWA(pelangganId, periode);
+        }
+
+        function batalBayar(pelangganId) {
+            kirimAksiKeCloud({
+                action: "BATAL_BAYAR",
+                id: pelangganId
+            }, "Pembayaran dibatalkan di Cloud");
+        }
+
+        function hapusPelanggan(id) {
+            if (!currentUser || !currentUser.canEdit) return;
+            if (confirm('Yakin ingin menghapus pelanggan ini dari Cloud Database?')) {
+                kirimAksiKeCloud({
+                    action: "DELETE_PELANGGAN",
+                    id: id
+                }, "🗑️ Pelanggan berhasil dihapus dari Cloud");
+            }
+        }
+
+        // --- INTEGRASI WA ---
+        function formatNomorWA(noHp, namaPelanggan) {
+            let nomor = noHp ? String(noHp).trim() : '';
+            if (!nomor) {
+                nomor = prompt(`Nomor WA untuk ${namaPelanggan} belum ada. Masukkan nomor WA:`, "08");
+                if (!nomor) return null;
+            }
+            nomor = nomor.replace(/[^0-9]/g, '');
+            if (nomor.startsWith('0')) {
+                nomor = '62' + nomor.slice(1);
+            } else if (nomor.startsWith('8')) {
+                nomor = '62' + nomor;
+            }
+            return nomor.length >= 10 ? nomor : null;
+        }
+
+        function kirimTagihanWA(pelangganId, periode) {
+            const pelanggan = globalCloudData.find(p => String(p.id) === String(pelangganId));
+            if (!pelanggan) return;
+
+            const noWA = formatNomorWA(pelanggan.noHp, pelanggan.nama);
+            if (!noWA) return alert('Nomor WA tidak valid.');
+
+            const pesan = `*PEMBERITAHUAN TAGIHAN*\n========================\nKepada Yth: *${pelanggan.nama}*\nWilayah: *${pelanggan.wilayah}*\n\nBerikut rincian tagihan Anda:\n*Periode:* ${periode}\n*Nominal:* Rp ${pelanggan.nominal.toLocaleString('id-ID')}\n*Jatuh Tempo:* ${pelanggan.jatuhTempo !== '-' ? 'Tanggal ' + pelanggan.jatuhTempo : 'Akhir Bulan'}\n*Metode Pembayaran:* ${pelanggan.metode}\n\nMohon untuk dapat melakukan pembayaran tepat waktu.\nTerima kasih.`;
+            window.open(`https://wa.me/${noWA}?text=${encodeURIComponent(pesan)}`, '_blank');
+        }
+
+        function kirimStrukWA(pelangganId, periode) {
+            const pelanggan = globalCloudData.find(p => String(p.id) === String(pelangganId));
+            if (!pelanggan) return;
+
+            const noWA = formatNomorWA(pelanggan.noHp, pelanggan.nama);
+            if (!noWA) return alert('Nomor WA tidak valid.');
+
+            const tglBayar = pelanggan.tglBayar || new Date().toLocaleDateString('id-ID');
+            const pesan = `*STRUK BUKTI PEMBAYARAN*\n========================\n*Nama:* ${pelanggan.nama}\n*Wilayah:* ${pelanggan.wilayah}\n*Periode:* ${periode}\n*Nominal:* Rp ${pelanggan.nominal.toLocaleString('id-ID')}\n*Metode:* ${pelanggan.metode}\n*Tanggal Bayar:* ${tglBayar}\n*Status:* ✅ *LUNAS*\n========================\nTerima kasih telah melakukan pembayaran tepat waktu.`;
+            window.open(`https://wa.me/${noWA}?text=${encodeURIComponent(pesan)}`, '_blank');
+        }
+
+        // --- EXPORT EXCEL & PDF ---
+        function exportKeExcel() {
+            if (!dataTersaringUntukPDF || dataTersaringUntukPDF.length === 0) return alert('Tidak ada data!');
+
+            const periode = document.getElementById('filterBulan').value;
+            const filterWilayah = document.getElementById('filterWilayah').value;
+            const filterStatus = document.getElementById('filterStatusBayar').value;
+
+            const excelData = [
+                ["LAPORAN TAGIHAN DAN PEMBAYARAN BULANAN (CLOUD DATABASE)"],
+                [`Periode Tagihan: ${periode}`],
+                [`Filter Wilayah: ${filterWilayah}`],
+                [`Status Bayar: ${filterStatus}`],
+                [],
+                ["No", "Wilayah", "Nama Pelanggan", "No. WA", "Nominal Kotor (Rp)", "Nett/Bersih (Rp)", "Via", "Jatuh Tempo", "Status", "Tgl Bayar"]
+            ];
+
+            let totalLunas = 0, totalBelum = 0, totalInvestor = 0;
+
+            dataTersaringUntukPDF.forEach((p, index) => {
+                const isLunas = (p.status === "LUNAS" && p.periode === periode);
+                const isWage = isWageGembili(p.wilayah);
+                const nominalBersih = isWage ? Math.max(0, p.nominal - 50000) : p.nominal;
+
+                if (isLunas) {
+                    totalLunas += p.nominal;
+                    if (isWage) totalInvestor += 50000;
+                } else {
+                    totalBelum += p.nominal;
+                }
+
+                excelData.push([
+                    index + 1, p.wilayah, p.nama, p.noHp || '-', p.nominal, nominalBersih, p.metode,
+                    p.jatuhTempo !== '-' ? 'Tgl ' + p.jatuhTempo : '-', isLunas ? 'LUNAS' : 'BELUM BAYAR', isLunas ? p.tglBayar : '-'
+                ]);
+            });
+
+            excelData.push([]);
+            excelData.push(["", "", "", "Total Terbayar Lunas (Kotor):", totalLunas]);
+            excelData.push(["", "", "", "Total Bagi Hasil Investor (WAGE GEMBILI):", totalInvestor]);
+            excelData.push(["", "", "", "Total Terbayar Lunas (Bersih):", totalLunas - totalInvestor]);
+            excelData.push(["", "", "", "Total Belum Bayar:", totalBelum]);
+
+            const worksheet = XLSX.utils.aoa_to_sheet(excelData);
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, "Laporan Tagihan");
+            XLSX.writeFile(workbook, `Laporan_Tagihan_${filterWilayah}_${periode}.xlsx`);
+            showNotification('✓ Laporan Excel berhasil diunduh!');
+        }
+
+        function exportKePDF() {
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+
+            const periode = document.getElementById('filterBulan').value;
+            const filterWilayah = document.getElementById('filterWilayah').value;
+            const filterStatus = document.getElementById('filterStatusBayar').value;
+
+            doc.setFontSize(16);
+            doc.setFont('helvetica', 'bold');
+            doc.text('LAPORAN TAGIHAN DAN PEMBAYARAN BULANAN', 14, 15);
+            doc.setFontSize(10);
+            doc.setFont('helvetica', 'normal');
+            doc.text(`Periode: ${periode} | Wilayah: ${filterWilayah} | Status: ${filterStatus}`, 14, 22);
+
+            let totalLunas = 0, totalBelum = 0, totalInvestor = 0;
+
+            const tableHead = [["No", "Wilayah", "Nama Pelanggan", "No. WA", "Nominal Kotor", "Nett (Bersih)", "Via", "Jatuh Tempo", "Status", "Tgl Bayar"]];
+            const tableData = dataTersaringUntukPDF.map((p, index) => {
+                const isLunas = (p.status === "LUNAS" && p.periode === periode);
+                const isWage = isWageGembili(p.wilayah);
+                const nominalBersih = isWage ? Math.max(0, p.nominal - 50000) : p.nominal;
+
+                if (isLunas) {
+                    totalLunas += p.nominal;
+                    if (isWage) totalInvestor += 50000;
+                } else {
+                    totalBelum += p.nominal;
+                }
+
+                return [
+                    index + 1, p.wilayah, p.nama, p.noHp || '-', `Rp ${p.nominal.toLocaleString('id-ID')}`,
+                    `Rp ${nominalBersih.toLocaleString('id-ID')}`, p.metode, p.jatuhTempo !== '-' ? 'Tgl ' + p.jatuhTempo : '-',
+                    isLunas ? 'LUNAS' : 'BELUM BAYAR', isLunas ? p.tglBayar : '-'
+                ];
+            });
+
+            doc.autoTable({
+                head: tableHead, body: tableData, startY: 28, theme: 'grid',
+                headStyles: { fillColor: [33, 37, 41] }, styles: { fontSize: 8 }
+            });
+
+            const finalY = doc.lastAutoTable.finalY + 8;
+            doc.setFontSize(9);
+            doc.setFont('helvetica', 'bold');
+            doc.text(`Total Lunas (Kotor): Rp ${totalLunas.toLocaleString('id-ID')} | Total Investor: Rp ${totalInvestor.toLocaleString('id-ID')} | Total Lunas (Bersih): Rp ${(totalLunas - totalInvestor).toLocaleString('id-ID')}`, 14, finalY);
+
+            doc.save(`Laporan_Tagihan_${filterWilayah}_${periode}.pdf`);
+        }
+
+        checkSession();
+    </script>
+</body>
+</html>
